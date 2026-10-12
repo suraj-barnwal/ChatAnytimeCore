@@ -16,11 +16,15 @@ namespace ChatAPI.Services
 
         public string CreateToken(User user)
         {
+            var adminEmail = _confuguration["Admin:Email"];
+            var isAdmin = !string.IsNullOrWhiteSpace(adminEmail)
+                && string.Equals(user.Email, adminEmail.Trim(), StringComparison.OrdinalIgnoreCase);
             var claims = new[]
             {
                 new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
                 new Claim(ClaimTypes.Name,user.Name),
-                new Claim(ClaimTypes.Email, user.Email)
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.Role, isAdmin ? "Admin" : "User")
             };
 
             var key = new SymmetricSecurityKey(

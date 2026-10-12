@@ -33,6 +33,26 @@ namespace ChatAPI.Migrations
                     b.Property<bool>("IsRead")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsDelivered")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsHiddenForSender")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsHiddenForReceiver")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("MediaContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("MediaData")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("MediaFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
                     b.Property<int>("ReceiverId")
                         .HasColumnType("int");
 

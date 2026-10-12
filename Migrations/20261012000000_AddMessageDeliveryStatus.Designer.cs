@@ -1,0 +1,63 @@
+using System;
+using ChatAPI.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+
+#nullable disable
+
+namespace ChatAPI.Migrations
+{
+    [DbContext(typeof(ApplicationDbContext))]
+    [Migration("20261012000000_AddMessageDeliveryStatus")]
+    partial class AddMessageDeliveryStatus
+    {
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        {
+#pragma warning disable 612, 618
+            modelBuilder
+                .HasAnnotation("ProductVersion", "8.0.0")
+                .HasAnnotation("Relational:MaxIdentifierLength", 128);
+
+            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
+
+            modelBuilder.Entity("ChatAPI.Models.Message", b =>
+            {
+                b.Property<int>("MessageId").ValueGeneratedOnAdd().HasColumnType("int");
+                SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MessageId"));
+                b.Property<bool>("IsDelivered").HasColumnType("bit");
+                b.Property<bool>("IsRead").HasColumnType("bit");
+                b.Property<int>("ReceiverId").HasColumnType("int");
+                b.Property<int>("SenderId").HasColumnType("int");
+                b.Property<DateTime>("SentTime").HasColumnType("datetime2");
+                b.Property<string>("Text").IsRequired().HasColumnType("nvarchar(max)");
+                b.HasKey("MessageId");
+                b.HasIndex("ReceiverId");
+                b.HasIndex("SenderId");
+                b.ToTable("Messages");
+            });
+
+            modelBuilder.Entity("ChatAPI.Models.User", b =>
+            {
+                b.Property<int>("UserId").ValueGeneratedOnAdd().HasColumnType("int");
+                SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("UserId"));
+                b.Property<string>("Email").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)");
+                b.Property<string>("Name").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)");
+                b.Property<string>("Password").IsRequired().HasMaxLength(150).HasColumnType("nvarchar(150)");
+                b.HasKey("UserId");
+                b.ToTable("Users");
+            });
+
+            modelBuilder.Entity("ChatAPI.Models.Message", b =>
+            {
+                b.HasOne("ChatAPI.Models.User", "Receiver").WithMany().HasForeignKey("ReceiverId").OnDelete(DeleteBehavior.NoAction).IsRequired();
+                b.HasOne("ChatAPI.Models.User", "Sender").WithMany().HasForeignKey("SenderId").OnDelete(DeleteBehavior.NoAction).IsRequired();
+                b.Navigation("Receiver");
+                b.Navigation("Sender");
+            });
+#pragma warning restore 612, 618
+        }
+    }
+}
