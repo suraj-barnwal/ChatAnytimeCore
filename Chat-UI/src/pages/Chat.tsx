@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import connection from "../services/signalr";
 import api from "../services/api";
@@ -46,32 +46,53 @@ const frequentEmojis = ["😀", "😃", "😄", "😁", "😆", "😂", "🙂", 
 function MessageMedia({ messageId, contentType, fileName, onSize }: { messageId: number; contentType: string; fileName?: string; onSize: (messageId: number, size: number) => void }) {
     const [source, setSource] = useState("");
     const [failed, setFailed] = useState(false);
+    const mediaRef = useRef<HTMLSpanElement | null>(null);
 
     useEffect(() => {
         let objectUrl = "";
         let cancelled = false;
-        api.get(`/Messages/Media/${messageId}`, {
-            responseType: "blob",
-            headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` }
-        }).then((response) => {
-            if (cancelled) return;
-            objectUrl = URL.createObjectURL(response.data);
-            setSource(objectUrl);
-            onSize(messageId, response.data.size);
-        }).catch(() => { if (!cancelled) setFailed(true); });
+        const loadMedia = () => {
+            api.get(`/Messages/Media/${messageId}`, {
+                responseType: "blob",
+                headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` }
+            }).then((response) => {
+                if (cancelled) return;
+                objectUrl = URL.createObjectURL(response.data);
+                setSource(objectUrl);
+                onSize(messageId, response.data.size);
+            }).catch(() => { if (!cancelled) setFailed(true); });
+        };
+        const element = mediaRef.current;
+        if (element && "IntersectionObserver" in window) {
+            const observer = new IntersectionObserver((entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) {
+                    observer.disconnect();
+                    loadMedia();
+                }
+            }, { root: element.closest(".message-area"), rootMargin: "320px" });
+            observer.observe(element);
+            return () => {
+                cancelled = true;
+                observer.disconnect();
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+            };
+        }
+        loadMedia();
         return () => {
             cancelled = true;
             if (objectUrl) URL.revokeObjectURL(objectUrl);
         };
     }, [messageId, onSize]);
 
-    if (failed) return <span className="media-unavailable">Media unavailable</span>;
-    if (!source) return <span className="media-loading">Loading media…</span>;
-    if (contentType.startsWith("video/")) return <video className="message-media" src={source} controls preload="metadata" />;
-    if (contentType.startsWith("image/")) return <img className="message-media" src={source} alt={fileName || "Shared image"} loading="lazy" />;
-    return <a className="message-attachment" href={source} download={fileName || "download"}>
-        <span aria-hidden="true">📎</span><span>{fileName || "Download attachment"}</span>
-    </a>;
+    return <span className="media-fetch-trigger" ref={mediaRef}>
+        {failed ? <span className="media-unavailable">Media unavailable</span>
+            : !source ? <span className="media-loading">Media loads as you scroll</span>
+                : contentType.startsWith("video/") ? <video className="message-media" src={source} controls preload="metadata" />
+                    : contentType.startsWith("image/") ? <img className="message-media" src={source} alt={fileName || "Shared image"} loading="lazy" />
+                        : <a className="message-attachment" href={source} download={fileName || "download"}>
+                            <span aria-hidden="true">📎</span><span>{fileName || "Download attachment"}</span>
+                        </a>}
+    </span>;
 }
 
 function statusRank(status: NonNullable<ChatMessage["status"]>): number {
@@ -106,7 +127,7 @@ function getUserIdFromToken(): number | undefined {
 }
 
 function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: boolean; onLogout: () => void; onAvailabilityChange: (available: boolean) => void }) {
-    const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.matchMedia("(min-width: 761px)").matches);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const savedName = sessionStorage.getItem("userName");
     const [userName, setUserName] = useState(savedName && savedName !== "You" && savedName !== "undefined" ? savedName : "Loading profile...");
     const [message, setMessage] = useState("");
@@ -118,6 +139,8 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
     const [mediaCompressionStatus, setMediaCompressionStatus] = useState("");
     const [mediaCompressionError, setMediaCompressionError] = useState("");
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [hasOlderMessages, setHasOlderMessages] = useState(false);
+    const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
     const [isConnected, setIsConnected] = useState(false);
     const [users, setUsers] = useState<ChatUser[]>([]);
     const [isLoadingUsers, setIsLoadingUsers] = useState(true);
@@ -141,6 +164,8 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
     const statusUpdates = useRef(new Map<number, ChatMessage["status"]>());
     const nextOptimisticMessageId = useRef(-1);
     const messageAreaRef = useRef<HTMLDivElement | null>(null);
+    const shouldAutoScrollRef = useRef(true);
+    const preservedScrollRef = useRef<{ height: number; top: number } | null>(null);
     const mediaInputRef = useRef<HTMLInputElement | null>(null);
     const emojiControlRef = useRef<HTMLDivElement | null>(null);
     selectedReceiverId.current = receiverId;
@@ -185,9 +210,16 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
         }
     };
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const messageArea = messageAreaRef.current;
-        if (messageArea) messageArea.scrollTo({ top: messageArea.scrollHeight, behavior: "smooth" });
+        if (!messageArea) return;
+        if (preservedScrollRef.current) {
+            const previous = preservedScrollRef.current;
+            messageArea.scrollTop = previous.top + messageArea.scrollHeight - previous.height;
+            preservedScrollRef.current = null;
+        } else if (shouldAutoScrollRef.current) {
+            messageArea.scrollTo({ top: messageArea.scrollHeight, behavior: "auto" });
+        }
     }, [messages.length, receiverId]);
 
     useEffect(() => {
@@ -307,9 +339,11 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
     useEffect(() => {
         if (!isConnected || receiverId === null) return;
         const token = sessionStorage.getItem("token");
-        api.get<ApiMessage[]>(`/Messages/${receiverId}`, {
+        let cancelled = false;
+        api.get<ApiMessage[]>(`/Messages/${receiverId}?take=50`, {
             headers: { Authorization: `Bearer ${token}` }
         }).then((response) => {
+            if (cancelled) return;
             const currentUserId = Number(sessionStorage.getItem("userId"));
             const loadedMessages: ChatMessage[] = response.data.map((item) => ({
                 id: item.id,
@@ -320,6 +354,7 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
                 mediaContentType: item.mediaContentType ?? undefined,
                 mediaFileName: item.mediaFileName ?? undefined
             }));
+            setHasOlderMessages(response.data.length === 50);
             void refreshUsers().catch((error: unknown) => console.error("Could not refresh conversation notifications:", error));
             setMessages((previous) => {
                 const byId = new Map<number, ChatMessage>(loadedMessages.map((item): [number, ChatMessage] => [item.id, item]));
@@ -330,18 +365,60 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
                 return [...byId.values()].sort((a, b) => a.id - b.id);
             });
         }).catch((error: unknown) => {
+            if (cancelled) return;
             console.error("Could not load conversation:", error);
             setLoadError("Could not load the conversation history.");
         });
+        return () => { cancelled = true; };
     }, [isConnected, receiverId]);
+
+    const loadOlderMessages = async () => {
+        if (!receiverId || !hasOlderMessages || isLoadingOlderMessages || !messages.length) return;
+        const requestedReceiverId = receiverId;
+        const positiveMessageIds = messages.filter((item) => item.id > 0).map((item) => item.id);
+        const oldestMessageId = Math.min(...positiveMessageIds);
+        if (!Number.isFinite(oldestMessageId)) return;
+        const messageArea = messageAreaRef.current;
+        if (!messageArea) return;
+        preservedScrollRef.current = { height: messageArea.scrollHeight, top: messageArea.scrollTop };
+        setIsLoadingOlderMessages(true);
+        try {
+            const token = sessionStorage.getItem("token");
+            const response = await api.get<ApiMessage[]>(`/Messages/${receiverId}?beforeId=${oldestMessageId}&take=50`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (selectedReceiverId.current !== requestedReceiverId) return;
+            const currentUserId = Number(sessionStorage.getItem("userId"));
+            const olderMessages: ChatMessage[] = response.data.map((item) => ({
+                id: item.id,
+                text: item.text,
+                direction: item.senderId === currentUserId ? "outgoing" : "incoming",
+                time: formatMessageTime(item.sentTime),
+                status: item.isRead ? "seen" : item.isDelivered ? "received" : "sent",
+                mediaContentType: item.mediaContentType ?? undefined,
+                mediaFileName: item.mediaFileName ?? undefined
+            }));
+            setHasOlderMessages(response.data.length === 50);
+            setMessages((current) => {
+                const knownIds = new Set(current.map((item) => item.id));
+                return [...olderMessages.filter((item) => !knownIds.has(item.id)), ...current];
+            });
+        } catch (error) {
+            preservedScrollRef.current = null;
+            console.error("Could not load older messages:", error);
+            setLoadError("Could not load older messages. Please try again.");
+        } finally {
+            setIsLoadingOlderMessages(false);
+        }
+    };
 
     useEffect(() => {
         if (!isConnected || receiverId === null) return;
         const markOpenConversationRead = () => {
             if (document.visibilityState !== "visible" || !document.hasFocus()) return;
             const token = sessionStorage.getItem("token");
-            api.get(`/Messages/${receiverId}`, { headers: { Authorization: `Bearer ${token}` } })
-                .then(() => refreshUsers())
+            api.post(`/Messages/${receiverId}/Read`, {}, { headers: { Authorization: `Bearer ${token}` } })
+                .then(() => setUsers((current) => current.map((user) => user.userId === receiverId ? { ...user, unreadCount: 0 } : user)))
                 .catch((error: unknown) => console.error("Could not mark conversation as read:", error));
         };
         document.addEventListener("visibilitychange", markOpenConversationRead);
@@ -551,7 +628,7 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
     };
 
     return (
-        <main className={`chat-shell ${isSidebarOpen ? "sidebar-open" : "sidebar-hidden"}`}>
+        <main className={`chat-shell ${isSidebarOpen ? "sidebar-open" : "sidebar-hidden"} ${receiverId === null ? "conversation-picker" : ""}`}>
             {isSidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="Close conversations menu" onClick={() => setIsSidebarOpen(false)} />}
             <aside className="sidebar">
                 <div className="brand"><span className="brand-mark">✦</span> Chat Anytime{isAdmin && <button className={`availability-toggle ${isAvailable ? "is-live" : "is-offline"}`} type="button" title={isAvailable ? "Turn application off" : "Turn application on"} aria-label={isAvailable ? "Turn application off" : "Turn application on"} onClick={() => setAvailabilityDialogOpen(true)}>⏻</button>}</div>
@@ -559,24 +636,38 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
                     <span className="avatar">{initials}</span>
                     <div className="profile-name"><strong>{userName}</strong><i className={`presence-dot ${isConnected ? "online" : "offline"}`} role="img" aria-label={isConnected ? "Online" : "Offline"} title={isConnected ? "Online" : "Offline"} /></div>
                 </div>
-                <p className="sidebar-label">Your conversations</p>
-                {users.map((user) => {
-                    const online = onlineUserIds.includes(user.userId);
-                    const preview = user.lastMessageContentType
-                        ? `${user.lastMessageContentType.startsWith("video/") ? "Video" : user.lastMessageContentType.startsWith("image/") ? "Photo" : "File"}${user.lastMessageText ? ` · ${user.lastMessageText}` : ""}`
-                        : user.lastMessageText || "Start a new thought";
-                    return <button className={`chat-preview ${receiverId === user.userId ? "active" : ""}`} type="button" key={user.userId} onClick={() => { setReceiverId(user.userId); setUsers((current) => current.map((item) => item.userId === user.userId ? { ...item, unreadCount: 0 } : item)); setMessages([]); setSelectedMessageIds([]); setIsSelectingMessages(false); closeSidebarAfterSelection(); }}>
-                        <span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span>
-                        <div className="chat-preview-copy">
-                            <strong>{user.name}<i className={`presence-dot ${online ? "online" : "offline"}`} aria-label={online ? "Online" : "Offline"} title={online ? "Online" : "Offline"} /></strong>
-                            <small className="chat-preview-subline"><span>{preview}</span><time>{formatPreviewTime(user.lastMessageTime)}</time></small>
-                        </div>
-                        {user.unreadCount > 0 && <span className="unread-badge" aria-label={`${user.unreadCount} unread messages`}>{user.unreadCount > 99 ? "99+" : user.unreadCount}</span>}
-                    </button>;
-                })}
-                {userListError && <div className="sidebar-list-error"><span>{userListError}</span><button type="button" onClick={() => { setUserListError(""); setIsLoadingUsers(true); void refreshUsers().catch((error: unknown) => console.error("Could not reload users:", error)); }}>Retry</button></div>}
-                {!userListError && isLoadingUsers && <p className="sidebar-list-state">Loading users…</p>}
-                {!userListError && !isLoadingUsers && !users.length && <p className="sidebar-list-state">No other users yet</p>}
+                <div className="sidebar-conversations">
+                    <p className="sidebar-label">Your conversations</p>
+                    {users.map((user) => {
+                        const online = onlineUserIds.includes(user.userId);
+                        const preview = user.lastMessageContentType
+                            ? `${user.lastMessageContentType.startsWith("video/") ? "Video" : user.lastMessageContentType.startsWith("image/") ? "Photo" : "File"}${user.lastMessageText ? ` · ${user.lastMessageText}` : ""}`
+                            : user.lastMessageText || "Start a new thought";
+                        return <button className={`chat-preview ${receiverId === user.userId ? "active" : ""}`} type="button" key={user.userId} onClick={() => {
+                            closeSidebarAfterSelection();
+                            if (receiverId === user.userId) return;
+                            shouldAutoScrollRef.current = true;
+                            preservedScrollRef.current = null;
+                            setReceiverId(user.userId);
+                            setHasOlderMessages(false);
+                            setUsers((current) => current.map((item) => item.userId === user.userId ? { ...item, unreadCount: 0 } : item));
+                            setMessages([]);
+                            setLoadError("");
+                            setSelectedMessageIds([]);
+                            setIsSelectingMessages(false);
+                        }}>
+                            <span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span>
+                            <div className="chat-preview-copy">
+                                <strong>{user.name}<i className={`presence-dot ${online ? "online" : "offline"}`} aria-label={online ? "Online" : "Offline"} title={online ? "Online" : "Offline"} /></strong>
+                                <small className="chat-preview-subline"><span>{preview}</span><time>{formatPreviewTime(user.lastMessageTime)}</time></small>
+                            </div>
+                            {user.unreadCount > 0 && <span className="unread-badge" aria-label={`${user.unreadCount} unread messages`}>{user.unreadCount > 99 ? "99+" : user.unreadCount}</span>}
+                        </button>;
+                    })}
+                    {userListError && <div className="sidebar-list-error"><span>{userListError}</span><button type="button" onClick={() => { setUserListError(""); setIsLoadingUsers(true); void refreshUsers().catch((error: unknown) => console.error("Could not reload users:", error)); }}>Retry</button></div>}
+                    {!userListError && isLoadingUsers && <p className="sidebar-list-state">Loading users…</p>}
+                    {!userListError && !isLoadingUsers && !users.length && <p className="sidebar-list-state">No other users yet</p>}
+                </div>
                 <div className="sidebar-footer">
                     <div className="connection"><span className={`status-dot ${isConnected ? "connected" : ""}`} />{userName}</div>
                     <button className="logout-button" type="button" onClick={logout}>Sign out</button>
@@ -600,7 +691,13 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
                     </div>
                 </header>
 
-                <div className="message-area" ref={messageAreaRef}>
+                <div className="message-area" ref={messageAreaRef} onScroll={(event) => {
+                    const area = event.currentTarget;
+                    shouldAutoScrollRef.current = area.scrollHeight - area.scrollTop - area.clientHeight < 120;
+                }}>
+                    {hasOlderMessages && receiverId !== null && <button type="button" className="load-older-button" onClick={() => void loadOlderMessages()} disabled={isLoadingOlderMessages}>
+                        {isLoadingOlderMessages ? "Loading older messages…" : "Load older messages"}
+                    </button>}
                     <div className="day-divider"><span>Today</span></div>
                     <div className="selection-toolbar">
                         {isSelectingMessages ? <>

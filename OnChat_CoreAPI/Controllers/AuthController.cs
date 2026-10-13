@@ -100,7 +100,7 @@ namespace ChatAPI.Controllers
 
         [Authorize]
         [HttpGet("Messages/{otherUserId:int}")]
-        public async Task<IActionResult> Messages(int otherUserId)
+        public async Task<IActionResult> Messages(int otherUserId, [FromQuery] int? beforeId = null, [FromQuery] int take = 50)
         {
             var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)
                 ?? User.FindFirstValue("nameid")
@@ -108,14 +108,37 @@ namespace ChatAPI.Controllers
             if (!int.TryParse(currentUserId, out var userId)) return Unauthorized();
             if (userId == otherUserId) return BadRequest("You cannot open a conversation with yourself.");
 
-            var conversation = await _context.Messages
+            take = Math.Clamp(take, 1, 100);
+            var conversationQuery = _context.Messages
                 .Where(message =>
                 (message.SenderId == userId && message.ReceiverId == otherUserId) ||
                     (message.SenderId == otherUserId && message.ReceiverId == userId))
                 .Where(message => message.SenderId == userId
                     ? !message.IsHiddenForSender
-                    : !message.IsHiddenForReceiver)
-                .OrderBy(message => message.SentTime)
+                    : !message.IsHiddenForReceiver);
+
+            var newlySeen = await _context.Messages
+                .AsNoTracking()
+                .Where(message => message.SenderId == otherUserId && message.ReceiverId == userId &&
+                    !message.IsRead && !message.IsHiddenForReceiver)
+                .Select(message => new { message.MessageId, message.SenderId })
+                .ToListAsync();
+            if (newlySeen.Count > 0)
+            {
+                var newlySeenIds = newlySeen.Select(message => message.MessageId).ToList();
+                await _context.Messages.Where(message => newlySeenIds.Contains(message.MessageId))
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(message => message.IsDelivered, true)
+                        .SetProperty(message => message.IsRead, true));
+                await Task.WhenAll(newlySeen.Select(message =>
+                    _chatHub.Clients.User(message.SenderId.ToString())
+                        .SendAsync("MessageStatusUpdated", message.MessageId, "seen")));
+            }
+
+            var conversation = await conversationQuery
+                .Where(message => beforeId == null || message.MessageId < beforeId.Value)
+                .OrderByDescending(message => message.MessageId)
+                .Take(take)
                 .Select(message => new
                 {
                     message.MessageId,
@@ -130,22 +153,7 @@ namespace ChatAPI.Controllers
                 })
                 .ToListAsync();
 
-            var newlySeen = conversation.Where(message => message.ReceiverId == userId && !message.IsRead).ToList();
-            if (newlySeen.Count > 0)
-            {
-                var newlySeenIds = newlySeen.Select(message => message.MessageId).ToList();
-                await _context.Messages.Where(message => newlySeenIds.Contains(message.MessageId))
-                    .ExecuteUpdateAsync(update => update
-                        .SetProperty(message => message.IsDelivered, true)
-                        .SetProperty(message => message.IsRead, true));
-                foreach (var message in newlySeen)
-                {
-                    await _chatHub.Clients.User(message.SenderId.ToString())
-                        .SendAsync("MessageStatusUpdated", message.MessageId, "seen");
-                }
-            }
-
-            return Ok(conversation.Select(message => new
+            return Ok(conversation.OrderBy(message => message.MessageId).Select(message => new
             {
                 id = message.MessageId,
                 senderId = message.SenderId,
@@ -159,6 +167,37 @@ namespace ChatAPI.Controllers
                 isDelivered = message.IsDelivered || message.ReceiverId == userId,
                 isRead = message.IsRead || message.ReceiverId == userId
             }));
+        }
+
+        [Authorize]
+        [HttpPost("Messages/{otherUserId:int}/Read")]
+        public async Task<IActionResult> MarkConversationRead(int otherUserId)
+        {
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("nameid")
+                ?? User.FindFirstValue("sub");
+            if (!int.TryParse(currentUserId, out var userId)) return Unauthorized();
+            if (userId == otherUserId) return BadRequest("You cannot mark your own conversation as read.");
+
+            var unreadMessages = await _context.Messages
+                .AsNoTracking()
+                .Where(message => message.SenderId == otherUserId && message.ReceiverId == userId &&
+                    !message.IsRead && !message.IsHiddenForReceiver)
+                .Select(message => message.MessageId)
+                .ToListAsync();
+            if (unreadMessages.Count == 0) return Ok(new { updatedCount = 0 });
+
+            await _context.Messages
+                .Where(message => unreadMessages.Contains(message.MessageId))
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(message => message.IsDelivered, true)
+                    .SetProperty(message => message.IsRead, true));
+
+            await Task.WhenAll(unreadMessages.Select(messageId =>
+                _chatHub.Clients.User(otherUserId.ToString())
+                    .SendAsync("MessageStatusUpdated", messageId, "seen")));
+
+            return Ok(new { updatedCount = unreadMessages.Count });
         }
 
         [Authorize]

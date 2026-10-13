@@ -70,6 +70,7 @@ button { cursor: pointer; }
 .profile .profile-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .profile .profile-name .presence-dot { margin: 0; }
 .sidebar-label { margin: 34px 10px 12px; color: #8fa1a0; font-size: .69rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+.sidebar-conversations { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: rgba(255,255,255,.24) transparent; scrollbar-width: thin; }
 .sidebar-list-state { margin: 14px 10px; color: #a9b9b7; font-size: .78rem; }
 .sidebar-list-error { display: grid; gap: 10px; margin: 12px 8px; color: #ffd0c9; font-size: .76rem; line-height: 1.4; }
 .sidebar-list-error button { justify-self: start; padding: 6px 11px; border: 1px solid rgba(255,255,255,.2); border-radius: 7px; color: #fff; background: rgba(255,255,255,.07); font-size: .75rem; }
@@ -146,6 +147,9 @@ button { cursor: pointer; }
 @keyframes dialog-rise { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .message-area { min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: clamp(24px, 5vw, 58px) clamp(22px, 9vw, 130px); }
 .selection-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 42px; margin: -16px 0 18px; }
+.load-older-button { display: block; min-height: 40px; margin: 0 auto 20px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font-size: .78rem; }
+.load-older-button:hover { border-color: #c9c4bc; color: var(--ink); }
+.load-older-button:disabled { cursor: wait; opacity: .65; }
 .selection-toolbar > span { margin-right: auto; color: var(--muted); font-size: .82rem; font-weight: 600; }
 .day-divider { display: flex; align-items: center; gap: 12px; margin: 0 auto 34px; color: #aaa9a2; font-size: .7rem; }
 .day-divider::before, .day-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
@@ -162,6 +166,7 @@ button { cursor: pointer; }
 .message-bubble:not(.has-media) { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 3px; width: fit-content; }
 .outgoing .message-bubble { border-radius: 16px 16px 4px 16px; color: #fff; background: var(--coral); }
 .message-bubble.has-media { display: grid; gap: 5px; min-width: 150px; }
+.media-fetch-trigger { display: block; min-height: 24px; }
 .message-text { min-width: 0; flex: 0 1 auto; overflow-wrap: anywhere; }
 .message-media { display: block; width: min(100%, 340px); max-height: 330px; border-radius: 10px; object-fit: contain; background: rgba(0,0,0,.06); }
 .message-bubble video.message-media { width: min(100%, 400px); }
@@ -222,7 +227,7 @@ button { cursor: pointer; }
   .auth-copy p { font-size: .88rem; }
   .auth-note { display: none; }
   .auth-panel { padding: 42px 24px 56px; }
-  .chat-shell { display: flex; flex-direction: column; }
+  .chat-shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
   .sidebar-hidden .sidebar { display: flex; }
   .sidebar { position: fixed; z-index: 20; inset: 0 auto 0 0; width: min(86vw, 320px); height: 100vh; height: 100dvh; min-height: 0; padding: 20px 16px; box-shadow: 12px 0 32px rgba(17,28,32,.2); transform: translateX(-105%); transition: transform .22s ease; }
   .sidebar-open .sidebar { transform: translateX(0); }
@@ -231,35 +236,37 @@ button { cursor: pointer; }
   .profile, .sidebar-footer { display: flex; }
   .sidebar-footer { flex-direction: column; }
   .sidebar-label { margin: 20px 4px 10px; }
+  .sidebar-conversations { width: 100%; }
   .chat-preview { display: flex; }
   .chat-preview-subline time { font-size: .6rem; }
   .unread-badge { min-width: 20px; height: 20px; }
-  .chat-header { min-height: 72px; gap: 8px; padding: 12px; }
+  .chat-header { min-height: 64px; gap: 6px; padding: 8px 10px; }
   .chat-header-start { gap: 8px; }
   .chat-header-end { gap: 8px; }
   .header-action { padding: 8px 10px; }
   .chat-heading { min-width: 0; gap: 8px; }
   .chat-heading .avatar { width: 36px; height: 36px; border-radius: 11px; }
-  .chat-heading h1 { max-width: 21vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95rem; }
+  .chat-heading h1 { max-width: min(38vw, 200px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95rem; }
   .chat-heading p { gap: 5px; font-size: .66rem; }
-  .signed-in-user { gap: 6px; }
-  .signed-in-user .avatar { display: none; }
-  .signed-in-user strong { max-width: 18vw; font-size: .72rem; }
-  .signed-in-user span:not(.avatar) { gap: 5px; font-size: .63rem; }
-  .signed-in-user .presence-dot { width: 6px; height: 6px; }
+  .signed-in-user { display: none; }
   .sidebar-toggle { width: 38px; height: 38px; }
-  .chat-header-end .header-action { padding: 7px 8px; font-size: .67rem; white-space: nowrap; }
+  .chat-header-end .header-action { min-height: 40px; padding: 7px 9px; font-size: .68rem; white-space: nowrap; }
   .selection-toolbar { margin: -12px 0 16px; }
   .chat-main { min-height: 0; flex: 1 1 auto; }
-  .message-area { min-height: 0; padding: 26px 18px; }
-  .message-bubble { max-width: 84%; }
+  .message-area { min-height: 0; padding: 18px 12px; }
+  .message-list { gap: 8px; }
+  .message-bubble { max-width: min(88%, 520px); padding: 10px 12px; font-size: .9rem; }
   .message-media { max-height: 250px; }
-  .composer-wrap { padding: 13px 18px 18px; }
+  .composer-wrap { padding: 10px 10px calc(8px + env(safe-area-inset-bottom)); }
   .composer-hint { display: none; }
   .composer-wrap { position: relative; }
   .composer { gap: 4px; padding-left: 12px; }
+  .composer input { font-size: 16px; }
   .composer-actions { gap: 1px; }
   .composer-tool { width: 30px; height: 34px; }
   .send-button { width: 34px; height: 34px; }
   .emoji-picker { right: 18px; grid-template-columns: repeat(6, 38px); }
+  .conversation-picker .chat-main, .conversation-picker .sidebar-backdrop { display: none; }
+  .conversation-picker .sidebar { position: fixed; inset: 0; width: 100%; height: 100vh; height: 100dvh; padding: calc(18px + env(safe-area-inset-top)) 18px calc(12px + env(safe-area-inset-bottom)); box-shadow: none; transform: translateX(0); }
+  .conversation-picker .sidebar .brand { margin: 0 4px 20px; }
 }
