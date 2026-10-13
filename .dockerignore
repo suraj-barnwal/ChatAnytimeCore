@@ -1,0 +1,9 @@
+.git
+.vs
+bin
+obj
+**/bin
+**/obj
+*.user
+*.suo
+appsettings.Development.json

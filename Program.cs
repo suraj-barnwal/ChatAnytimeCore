@@ -25,9 +25,12 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactPolicy", policy =>
     {
-        // Vite may select another local port when its default port is busy.
-        // Accept loopback browser origins for local development (localhost, IPv4, IPv6).
-        policy.SetIsOriginAllowed(origin => Uri.TryCreate(origin, UriKind.Absolute, out var uri) && uri.IsLoopback)
+        // Allow local Vite origins in development and the explicitly configured
+        // public UI origin in Docker deployments.
+        var configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+        policy.SetIsOriginAllowed(origin =>
+                (Uri.TryCreate(origin, UriKind.Absolute, out var uri) && uri.IsLoopback)
+                || configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();

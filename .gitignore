@@ -5,3 +5,6 @@ obj/
 *.user
 *.suo
 *.cache
+.env
+.env.*
+!.env.example
