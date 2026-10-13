@@ -126,10 +126,32 @@ function getUserIdFromToken(): number | undefined {
     return Number.isInteger(userId) && userId > 0 ? userId : undefined;
 }
 
+function normalizeUsers(data: ApiUser[], currentUserId: number): ChatUser[] {
+    return data
+        .map((user) => ({
+            userId: Number(user.userId ?? user.UserId),
+            name: user.name ?? user.Name ?? "",
+            lastMessageText: user.lastMessageText ?? user.LastMessageText ?? "",
+            lastMessageTime: user.lastMessageTime ?? user.LastMessageTime ?? undefined,
+            lastMessageContentType: user.lastMessageContentType ?? user.LastMessageContentType ?? undefined,
+            unreadCount: Number(user.unreadCount ?? user.UnreadCount ?? 0)
+        }))
+        .filter((user) => Number.isInteger(user.userId) && user.userId !== currentUserId && user.name.length > 0)
+        .sort((left, right) => (right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0) - (left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0) || left.name.localeCompare(right.name));
+}
+
 function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: boolean; onLogout: () => void; onAvailabilityChange: (available: boolean) => void }) {
+    useEffect(() => {
+        const root = document.documentElement;
+        root.classList.add("chat-viewport");
+        return () => root.classList.remove("chat-viewport");
+    }, []);
+
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-    const savedName = sessionStorage.getItem("userName");
-    const [userName, setUserName] = useState(savedName && savedName !== "You" && savedName !== "undefined" ? savedName : "Loading profile...");
+    const [userName] = useState(() => {
+        const savedName = sessionStorage.getItem("userName") || getNameFromToken();
+        return savedName && savedName !== "You" && savedName !== "undefined" ? savedName : "Loading profile...";
+    });
     const [message, setMessage] = useState("");
     const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
     const [isUploadingMedia, setIsUploadingMedia] = useState(false);
@@ -149,7 +171,7 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
     const [loadError, setLoadError] = useState("");
     const [onlineUserIds, setOnlineUserIds] = useState<number[]>([]);
     const [sendError, setSendError] = useState("");
-    const [isAdmin, setIsAdmin] = useState(false);
+    const [isAdmin] = useState(() => sessionStorage.getItem("isAdmin") === "true");
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [clearScope, setClearScope] = useState<ClearScope | null>(null);
     const [clearTarget, setClearTarget] = useState<"conversation" | "selected">("conversation");
@@ -178,23 +200,29 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
             : item));
     }, []);
 
-    const refreshUsers = async () => {
+    const refreshUsers = async (showDirectoryFirst = false) => {
         const requestVersion = ++usersRefreshVersion.current;
+        let directoryLoaded = false;
         try {
             const token = sessionStorage.getItem("token");
             const currentUserId = getUserIdFromToken() || Number(sessionStorage.getItem("userId")) || 0;
-            const response = await api.get<ApiUser[]>("/Users", { headers: { Authorization: `Bearer ${token}` } });
-            const normalizedUsers = response.data
-                .map((user) => ({
-                    userId: Number(user.userId ?? user.UserId),
-                    name: user.name ?? user.Name ?? "",
-                    lastMessageText: user.lastMessageText ?? user.LastMessageText ?? "",
-                    lastMessageTime: user.lastMessageTime ?? user.LastMessageTime ?? undefined,
-                    lastMessageContentType: user.lastMessageContentType ?? user.LastMessageContentType ?? undefined,
-                    unreadCount: Number(user.unreadCount ?? user.UnreadCount ?? 0)
-                }))
-                .filter((user) => Number.isInteger(user.userId) && user.userId !== currentUserId && user.name.length > 0)
-                .sort((left, right) => (right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0) - (left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0) || left.name.localeCompare(right.name));
+            const headers = { Authorization: `Bearer ${token}` };
+            if (showDirectoryFirst) {
+                try {
+                    const directory = await api.get<ApiUser[]>("/Users/Directory", { headers });
+                    const directoryUsers = normalizeUsers(directory.data, currentUserId);
+                    directoryLoaded = true;
+                    if (requestVersion === usersRefreshVersion.current) {
+                        setUsers((current) => directoryUsers.map((user) => current.find((item) => item.userId === user.userId) ?? user));
+                        setUserListError("");
+                        setIsLoadingUsers(false);
+                    }
+                } catch (error) {
+                    console.warn("Could not load the quick user directory; loading full conversation summaries.", error);
+                }
+            }
+            const response = await api.get<ApiUser[]>("/Users", { headers });
+            const normalizedUsers = normalizeUsers(response.data, currentUserId);
             // A slower response must not replace more recent unread counts.
             if (requestVersion === usersRefreshVersion.current) {
                 setUsers(normalizedUsers);
@@ -203,8 +231,12 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
             }
         } catch (error) {
             if (requestVersion === usersRefreshVersion.current) {
-                setUserListError("Could not load users from the API. Check that it is running, then retry.");
+                if (!directoryLoaded) setUserListError("Could not load users from the API. Check that it is running, then retry.");
                 setIsLoadingUsers(false);
+            }
+            if (directoryLoaded) {
+                console.warn("The basic user list is available, but conversation previews could not be refreshed.", error);
+                return;
             }
             throw error;
         }
@@ -240,39 +272,24 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
 
     useEffect(() => {
         const startConnection = async () => {
-            const token = sessionStorage.getItem("token");
-            const headers = { Authorization: `Bearer ${token}` };
-            try {
-                const currentUserId = getUserIdFromToken() || Number(sessionStorage.getItem("userId")) || 0;
-                if (currentUserId) sessionStorage.setItem("userId", String(currentUserId));
-                await refreshUsers();
-            } catch (error) {
+            const currentUserId = getUserIdFromToken() || Number(sessionStorage.getItem("userId")) || 0;
+            if (currentUserId) sessionStorage.setItem("userId", String(currentUserId));
+
+            const usersTask = refreshUsers(true).catch((error: unknown) => {
                 console.error("Could not load chat users:", error);
                 setLoadError("Could not load chat users. Please sign in again and retry.");
-            }
-
-            let accountName = sessionStorage.getItem("userName") || getNameFromToken();
-            try {
-                const meResponse = await api.get<ApiUser>("/Me", { headers });
-                accountName = meResponse.data.name ?? meResponse.data.Name ?? accountName;
-                const adminAccess = meResponse.data.isAdmin ?? meResponse.data.IsAdmin ?? false;
-                setIsAdmin(adminAccess);
-                sessionStorage.setItem("isAdmin", String(adminAccess));
-            } catch (error) {
-                console.warn("Could not load profile from API; using the login name or token claim.", error);
-            }
-            accountName = accountName?.trim() || getNameFromToken() || "Signed-in user";
-            setUserName(accountName);
-            sessionStorage.setItem("userName", accountName);
-
-            try {
-                if (connection.state === "Disconnected") await connection.start();
-                setIsConnected(true);
-            } catch (error) {
-                console.error("SignalR Connection Error:", error);
-                setLoadError("Could not connect to chat. Check that the API is running.");
-                setIsConnected(false);
-            }
+            });
+            const connectionTask = (async () => {
+                try {
+                    if (connection.state === "Disconnected") await connection.start();
+                    setIsConnected(true);
+                } catch (error) {
+                    console.error("SignalR Connection Error:", error);
+                    setLoadError("Could not connect to chat. Check that the API is running.");
+                    setIsConnected(false);
+                }
+            })();
+            await Promise.all([usersTask, connectionTask]);
         };
 
         const receiveMessage = (id: number, senderId: number, _receiverId: number, receivedMessage: string, sentTime: string, mediaContentType?: string, mediaFileName?: string) => {

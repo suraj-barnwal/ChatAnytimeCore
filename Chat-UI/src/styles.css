@@ -18,6 +18,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
+html.chat-viewport, html.chat-viewport body, html.chat-viewport #root { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 
@@ -57,7 +58,7 @@ button { cursor: pointer; }
 .primary-button:disabled { cursor: wait; opacity: .65; transform: none; }
 .form-error { margin: -6px 0 16px; padding: 10px 12px; border: 1px solid #f0b8ae; border-radius: 8px; color: #a53b30; background: #fff1ee; font-size: .86rem; }
 
-.chat-shell { height: 100vh; height: 100dvh; min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); overflow: hidden; background: #ebe8e2; }
+.chat-shell { position: fixed; inset: 0; width: 100%; height: 100vh; height: 100dvh; min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); overflow: hidden; background: #ebe8e2; }
 .chat-shell.sidebar-hidden { grid-template-columns: minmax(0, 1fr); }
 .sidebar-hidden .sidebar { display: none; }
 .sidebar-backdrop { display: none; }
@@ -229,7 +230,7 @@ button { cursor: pointer; }
   .auth-panel { padding: 42px 24px 56px; }
   .chat-shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
   .sidebar-hidden .sidebar { display: flex; }
-  .sidebar { position: fixed; z-index: 20; inset: 0 auto 0 0; width: min(86vw, 320px); height: 100vh; height: 100dvh; min-height: 0; padding: 20px 16px; box-shadow: 12px 0 32px rgba(17,28,32,.2); transform: translateX(-105%); transition: transform .22s ease; }
+  .sidebar { position: fixed; z-index: 20; inset: 0 auto 0 0; width: min(86vw, 320px); height: 100vh; height: 100dvh; min-height: 0; padding: calc(20px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: 12px 0 32px rgba(17,28,32,.2); transform: translateX(-105%); transition: transform .22s ease; }
   .sidebar-open .sidebar { transform: translateX(0); }
   .sidebar-backdrop { position: fixed; z-index: 19; inset: 0; display: block; border: 0; background: rgba(18,27,30,.45); }
   .sidebar .brand { margin: 0 4px 24px; }
@@ -240,7 +241,7 @@ button { cursor: pointer; }
   .chat-preview { display: flex; }
   .chat-preview-subline time { font-size: .6rem; }
   .unread-badge { min-width: 20px; height: 20px; }
-  .chat-header { min-height: 64px; gap: 6px; padding: 8px 10px; }
+  .chat-header { min-height: 64px; gap: 6px; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; }
   .chat-header-start { gap: 8px; }
   .chat-header-end { gap: 8px; }
   .header-action { padding: 8px 10px; }

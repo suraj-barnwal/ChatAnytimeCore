@@ -110,6 +110,9 @@ namespace ChatAPI.Migrations
 
                     b.HasKey("UserId");
 
+                    b.HasIndex("Email")
+                        .HasDatabaseName("IX_Users_Email");
+
                     b.ToTable("Users");
                 });
 

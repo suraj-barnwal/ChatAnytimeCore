@@ -83,6 +83,24 @@ namespace ChatAPI.Controllers
         }
 
         [Authorize]
+        [HttpGet("Users/Directory")]
+        public async Task<IActionResult> UserDirectory()
+        {
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("nameid")
+                ?? User.FindFirstValue("sub");
+            if (!int.TryParse(currentUserId, out var userId)) return Unauthorized();
+
+            var users = await _context.Users
+                .AsNoTracking()
+                .Where(user => user.UserId != userId)
+                .OrderBy(user => user.Name)
+                .Select(user => new { user.UserId, user.Name })
+                .ToListAsync();
+            return Ok(users);
+        }
+
+        [Authorize]
         [HttpGet("Me")]
         public async Task<IActionResult> Me()
         {
@@ -447,7 +465,17 @@ namespace ChatAPI.Controllers
             if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrEmpty(model.Password))
                 return Unauthorized("Invalid Email or Password");
 
-            var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == model.Email.Trim());
+            var user = await _context.Users
+                .AsNoTracking()
+                .Where(candidate => candidate.Email == model.Email.Trim())
+                .Select(candidate => new User
+                {
+                    UserId = candidate.UserId,
+                    Name = candidate.Name,
+                    Email = candidate.Email,
+                    PasswordHash = candidate.PasswordHash
+                })
+                .FirstOrDefaultAsync();
 
             if (user?.PasswordHash is null)
             {
@@ -462,7 +490,9 @@ namespace ChatAPI.Controllers
             if (verification == PasswordVerificationResult.SuccessRehashNeeded)
             {
                 user.PasswordHash = _passwordHasher.HashPassword(user, model.Password);
-                await _context.SaveChangesAsync();
+                await _context.Users
+                    .Where(candidate => candidate.UserId == user.UserId)
+                    .ExecuteUpdateAsync(update => update.SetProperty(candidate => candidate.PasswordHash, user.PasswordHash));
             }
 
             var token = _tokenService.CreateToken(user);

@@ -16,6 +16,10 @@ namespace ChatAPI.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<User>()
+                .HasIndex(user => user.Email)
+                .HasDatabaseName("IX_Users_Email");
+
             modelBuilder.Entity<Message>()
                 .HasIndex(message => new { message.SenderId, message.ReceiverId, message.SentTime })
                 .HasDatabaseName("IX_Messages_Sender_Receiver_SentTime");

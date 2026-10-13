@@ -47,13 +47,14 @@ function Login({ onLogin }: { onLogin: () => void }) {
             onLogin();
         }
         catch(error: unknown){
-            console.log(error);
             if (axios.isAxiosError(error)) {
                 if (!error.response) {
                     setErrorMessage("Cannot reach the API. Check that it is running.");
+                } else if ([502, 503, 504].includes(error.response.status)) {
+                    setErrorMessage("The chat service is temporarily unavailable because the server cannot reach the API. Please try again shortly.");
                 } else if (error.response.status === 401) {
                     setErrorMessage("Invalid email or password.");
-                } else if (typeof error.response.data === "string") {
+                } else if (typeof error.response.data === "string" && !/<(?:!doctype|html|head|body)\b/i.test(error.response.data)) {
                     setErrorMessage(error.response.data);
                 } else {
                     setErrorMessage("The API could not complete the login. Check the API logs.");
