@@ -1,8 +1,11 @@
 ﻿# Keep the Docker build context small and exclude local/generated material.
 .git
 .vs
+.env
+.env.*
 **/bin
 **/obj
+OnChat_CoreAPI/backend-rebuild
 **/node_modules
 **/dist
 **/dist-ssr

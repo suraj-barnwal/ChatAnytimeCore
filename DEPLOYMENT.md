@@ -1,32 +1,59 @@
-﻿# Docker deployment
+# Public deployment from a Windows PC using a free Tailscale URL
 
-This repository contains the frontend (`Chat-UI`), API (`OnChat_CoreAPI`), and shared deployment files at the repository root. Clone the repository once to get both projects and the deployment configuration.
+This setup builds the frontend (`Chat-UI`) and API (`OnChat_CoreAPI`) with Docker Compose. Tailscale Funnel publishes the frontend over HTTPS at a stable `*.ts.net` address, so you do not need to buy a domain or open router ports. The API port is bound only to loopback; Nginx proxies the frontend, API routes, and SignalR WebSocket traffic internally.
 
-## API container
+Tailscale Funnel is currently in beta and has non-configurable bandwidth limits. Tailscale makes Funnel available on all plans, but its free Personal plan is for non-commercial use. Confirm that the plan terms fit how you intend to use this app before making it public. [Funnel overview and requirements](https://tailscale.com/docs/features/tailscale-funnel) · [Tailscale plans](https://tailscale.com/pricing)
 
-1. Install Docker Engine with the Compose plugin on the server.
-2. From the repository root, copy `.env.example` to `.env` and set real values. Generate a private JWT key (at least 32 characters) and use a SQL login dedicated to this app. Keep `.env` out of Git.
-3. Configure SQL Server to listen on a fixed TCP port, enable remote TCP connections, and allow that port through the server firewall. The example connection uses `host.docker.internal,1433`; use the actual host address and port if that name does not resolve on the server.
-4. Start the API from the repository root:
+## Prerequisites
 
-   ```powershell
-   docker compose up -d --build
-   docker compose logs -f chat-api
-   ```
+1. Install Docker Desktop for Windows and enable its WSL 2 backend. Configure Docker Desktop to start when you sign in. The PC and Docker Desktop must remain running for the app to be available.
+2. Install Tailscale for Windows and sign in to a Tailscale account. Enable MagicDNS and HTTPS certificates for the tailnet, and enable Funnel in the admin console/policy. [Windows installation](https://tailscale.com/download/windows) · [Funnel setup](https://tailscale.com/docs/features/tailscale-funnel)
+3. In SQL Server Configuration Manager, enable TCP/IP for the `SQLEXPRESS` instance, set a fixed TCP port of `1433`, and restart SQL Server. Enable mixed-mode authentication and create a dedicated SQL login that can access the app database. Docker containers cannot use your Windows integrated login for this SQL connection. Do not expose SQL Server's port on the router or to the internet. [Microsoft SQL Server port guidance](https://learn.microsoft.com/en-us/sql/tools/configuration-manager/tcp-ip-properties-ip-addresses-tab?view=sql-server-ver17)
 
-   The API is published on port 8080 by default. Verify `http://localhost:8080/System/Status` on the server.
+## Configure
 
-5. To publish the UI, build and serve `Chat-UI` with its production API base URL left empty so it calls the same origin. Configure a reverse proxy to serve the UI and forward `/chatHub` (including WebSocket upgrades) and the API routes (`/Login`, `/Register`, `/Users`, `/Me`, `/Messages`, `/System`, and `/api`) to `http://127.0.0.1:8080`. Set `PUBLIC_ORIGIN` to the exact public UI origin, for example `https://chat.example.com`, and recreate the API container.
-6. For access from outside the home/office network, point a domain at the server, configure the router's port forwarding and host firewall, and terminate HTTPS at a reverse proxy such as Caddy. Forward only HTTPS publicly; do not expose the API's plain HTTP port directly to the internet. If the ISP uses carrier-grade NAT, ordinary router port forwarding will not work; use a public tunnel or hosting provider.
+Find your Tailscale HTTPS name in the Tailscale admin console under **DNS** or **Machines**. It looks like `your-pc.your-tailnet.ts.net`.
 
-## Redeploy after pulling changes
+From the repository root, create the private environment file:
 
-On the server, from the repository root:
+```powershell
+Copy-Item .env.example .env
+```
+
+Edit `.env` and replace the example values:
+
+- `CHAT_DB_CONNECTION`: `Server=host.docker.internal,1433;Database=ChatDB;User Id=<sql-login>;Password=<strong-password>;Encrypt=True;TrustServerCertificate=True;`
+- `JWT_KEY`: a private random secret of at least 32 characters. Generate one in PowerShell with `[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))`.
+- `ADMIN_EMAIL`: the email address that should receive the app's admin role.
+- `PUBLIC_ORIGIN`: your exact Tailscale HTTPS origin, for example `https://your-pc.your-tailnet.ts.net`.
+
+Keep `.env` private; it is ignored by Git and Docker.
+
+## Start the app and publish it
+
+From the repository root:
+
+```powershell
+docker compose up -d --build
+docker compose logs -f chat-api
+```
+
+The UI is available on this PC at `http://localhost:8090`. The API applies its EF Core migrations at startup. In a second PowerShell window, run:
+
+```powershell
+tailscale funnel --bg 8090
+tailscale funnel status
+```
+
+Use the `https://...ts.net` URL shown by Tailscale to open the app from outside your network. Anyone with that public URL can reach the app, so use strong account passwords and only share the URL with intended users. The funnel only publishes the web service; it does not make SQL Server public.
+
+## Redeploy or stop
+
+After code changes, from the repository root:
 
 ```powershell
 git pull
 docker compose up -d --build
-docker image prune -f
 ```
 
-The named API service is rebuilt and restarted; the SQL database remains on the SQL Server host. Check `docker compose logs -f chat-api` after deployment. The frontend source is included under `Chat-UI`; rebuild its production assets and reload the web server after frontend changes.
+Stop the app containers with `docker compose down`; disable public access with `tailscale funnel reset`. Do not run `docker compose down -v` unless you intend to remove volumes.

@@ -14,4 +14,15 @@
       Admin__Email: ${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env}
       Cors__AllowedOrigins__0: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env}
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+
+  chat-web:
+    build:
+      context: .
+      dockerfile: deployment/frontend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - chat-api
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8090}:80"
+
