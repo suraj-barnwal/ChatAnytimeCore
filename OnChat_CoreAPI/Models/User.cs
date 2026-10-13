@@ -19,5 +19,8 @@ namespace ChatAPI.Models
         [MinLength(6)]
         [MaxLength(150)]
         public string Password { get; set; } = string.Empty;
+
+        [MaxLength(500)]
+        public string? PasswordHash { get; set; }
     }
 }

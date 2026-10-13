@@ -2,13 +2,23 @@ using ChatAPI.Data;
 using ChatAPI.Services;
 using ChatAPI.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var jwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrWhiteSpace(jwtKey) || Encoding.UTF8.GetByteCount(jwtKey) < 32)
+{
+    throw new InvalidOperationException("Jwt:Key must contain at least 32 bytes of cryptographically random data.");
+}
 
 // Keep development startup independent of Windows Event Log permissions.
 builder.Logging.ClearProviders();
@@ -17,6 +27,34 @@ builder.Logging.AddConsole();
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.Configure<PasswordHasherOptions>(options => options.IterationCount = 600_000);
+builder.Services.AddScoped<IPasswordHasher<ChatAPI.Models.User>, PasswordHasher<ChatAPI.Models.User>>();
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // The API is published only on host loopback and receives external requests
+    // through the Nginx container on the private Compose network.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+    options.ForwardLimit = 2;
+});
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("auth", context =>
+    {
+        var clientKey = context.Connection.RemoteIpAddress?.ToString() ?? "unknown-client";
+        return RateLimitPartition.GetFixedWindowLimiter(clientKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        });
+    });
+});
 
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IUserIdProvider, JwtUserIdProvider>();
@@ -121,9 +159,26 @@ using (var migrationScope = app.Services.CreateScope())
 {
     var dbContext = migrationScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     dbContext.Database.Migrate();
+
+    // Convert existing plain-text credentials once, then erase the old values.
+    var passwordHasher = migrationScope.ServiceProvider.GetRequiredService<IPasswordHasher<ChatAPI.Models.User>>();
+    var usersWithLegacyPasswords = await dbContext.Users
+        .Where(user => user.PasswordHash == null)
+        .ToListAsync();
+    foreach (var user in usersWithLegacyPasswords)
+    {
+        user.PasswordHash = passwordHasher.HashPassword(user, user.Password);
+        user.Password = string.Empty;
+    }
+    if (usersWithLegacyPasswords.Count > 0)
+    {
+        await dbContext.SaveChangesAsync();
+    }
 }
 
-//app.UseHttpsRedirection();
+app.UseForwardedHeaders();
+app.UseRouting();
+app.UseRateLimiter();
 
 app.UseCors("ReactPolicy");
 

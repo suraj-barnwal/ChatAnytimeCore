@@ -17,6 +17,14 @@ namespace ChatAPI.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Message>()
+                .HasIndex(message => new { message.SenderId, message.ReceiverId, message.SentTime })
+                .HasDatabaseName("IX_Messages_Sender_Receiver_SentTime");
+
+            modelBuilder.Entity<Message>()
+                .HasIndex(message => new { message.ReceiverId, message.SenderId, message.SentTime })
+                .HasDatabaseName("IX_Messages_Receiver_Sender_SentTime");
+
+            modelBuilder.Entity<Message>()
                 .HasOne(m => m.Sender)
                 .WithMany()
                 .HasForeignKey(m => m.SenderId)

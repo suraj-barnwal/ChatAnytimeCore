@@ -59,9 +59,6 @@ namespace ChatAPI.Hubs
             if (string.IsNullOrWhiteSpace(message))
                 throw new HubException("Message cannot be empty.");
 
-            if (!await _dbContext.Users.AnyAsync(user => user.UserId == receiverId))
-                throw new HubException("That user no longer exists.");
-
             var savedMessage = new Message
             {
                 SenderId = parsedSenderId,
@@ -71,7 +68,17 @@ namespace ChatAPI.Hubs
                 IsRead = false
             };
             _dbContext.Messages.Add(savedMessage);
-            await _dbContext.SaveChangesAsync();
+            try
+            {
+                // The foreign key validates the recipient as part of the insert,
+                // avoiding a separate database round trip before every send.
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                _dbContext.Entry(savedMessage).State = EntityState.Detached;
+                throw new HubException("Message could not be saved. Check the recipient and try again.");
+            }
 
             // Persist first; the recipient can fetch it later if currently offline.
             var recipientIsOnline = IsUserOnline(receiverId.ToString());

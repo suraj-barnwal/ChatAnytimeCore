@@ -36,7 +36,7 @@ namespace ChatAPI.Services
                 issuer: _confuguration["Jwt:Issuer"],
                 audience: _confuguration["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.Now.AddHours(1),
+                expires: DateTime.UtcNow.AddHours(1),
                 signingCredentials:creds);
 
             return new JwtSecurityTokenHandler().WriteToken(token);

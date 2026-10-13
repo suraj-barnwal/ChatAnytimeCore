@@ -1,7 +1,10 @@
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY Chat-UI/package.json Chat-UI/package-lock.json ./
-RUN npm ci
+# npm ci rejects the current lockfile because Windows npm left out an
+# optional peer dependency (@emnapi/runtime) required by the Linux build.
+# npm install reconciles that lockfile while creating the Linux image.
+RUN npm install --no-audit --no-fund
 COPY Chat-UI/ ./
 RUN npm run build
 

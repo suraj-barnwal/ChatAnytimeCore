@@ -8,6 +8,9 @@ using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using ChatAPI.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
+using System.ComponentModel.DataAnnotations;
 
 namespace ChatAPI.Controllers
 {
@@ -17,13 +20,15 @@ namespace ChatAPI.Controllers
         private readonly TokenService _tokenService;
         private readonly IHubContext<ChatHub> _chatHub;
         private readonly IConfiguration _configuration;
+        private readonly IPasswordHasher<User> _passwordHasher;
 
-        public AuthController(ApplicationDbContext context, TokenService tokenService, IHubContext<ChatHub> chatHub, IConfiguration configuration)
+        public AuthController(ApplicationDbContext context, TokenService tokenService, IHubContext<ChatHub> chatHub, IConfiguration configuration, IPasswordHasher<User> passwordHasher)
         {
             _context = context;
             _tokenService = tokenService;
             _chatHub = chatHub;
             _configuration = configuration;
+            _passwordHasher = passwordHasher;
         }
 
         [Authorize]
@@ -35,58 +40,46 @@ namespace ChatAPI.Controllers
                 ?? User.FindFirstValue("sub");
             if (!int.TryParse(currentUserId, out var userId)) return Unauthorized();
 
-            var users = await _context.Users
+            var summaries = await _context.Users
+                .AsNoTracking()
                 .Where(user => user.UserId != userId)
-                .Select(user => new { user.UserId, user.Name })
-                .ToListAsync();
-
-            var otherUserIds = users.Select(user => user.UserId).ToList();
-            var recentMessages = await _context.Messages
-                .Where(message =>
-                    (message.SenderId == userId && otherUserIds.Contains(message.ReceiverId)) ||
-                    (message.ReceiverId == userId && otherUserIds.Contains(message.SenderId)))
-                .Select(message => new
+                .Select(user => new
                 {
-                    message.MessageId,
-                    message.SenderId,
-                    message.ReceiverId,
-                    message.Text,
-                    message.SentTime,
-                    message.MediaContentType,
-                    message.IsRead,
-                    message.IsHiddenForSender,
-                    message.IsHiddenForReceiver
-                })
-                .ToListAsync();
-
-            var summaries = users.Select(user =>
-                {
-                    var conversation = recentMessages.Where(message =>
-                        (message.SenderId == userId && message.ReceiverId == user.UserId && !message.IsHiddenForSender) ||
-                        (message.SenderId == user.UserId && message.ReceiverId == userId && !message.IsHiddenForReceiver));
-                    var lastMessage = conversation
+                    user.UserId,
+                    user.Name,
+                    LastMessage = _context.Messages
+                        .Where(message =>
+                            (message.SenderId == userId && message.ReceiverId == user.UserId && !message.IsHiddenForSender) ||
+                            (message.SenderId == user.UserId && message.ReceiverId == userId && !message.IsHiddenForReceiver))
                         .OrderByDescending(message => message.SentTime)
                         .ThenByDescending(message => message.MessageId)
-                        .FirstOrDefault();
-                    var unreadCount = recentMessages.Count(message =>
+                        .Select(message => new
+                        {
+                            message.Text,
+                            message.SentTime,
+                            message.MediaContentType
+                        })
+                        .FirstOrDefault(),
+                    UnreadCount = _context.Messages.Count(message =>
                         message.SenderId == user.UserId && message.ReceiverId == userId &&
-                        !message.IsRead && !message.IsHiddenForReceiver);
-                    return new
-                    {
-                        user.UserId,
-                        user.Name,
-                        LastMessageText = lastMessage?.Text,
-                        LastMessageTime = lastMessage is null
-                            ? (DateTime?)null
-                            : DateTime.SpecifyKind(lastMessage.SentTime, DateTimeKind.Utc),
-                        LastMessageContentType = lastMessage?.MediaContentType,
-                        UnreadCount = unreadCount
-                    };
+                        !message.IsRead && !message.IsHiddenForReceiver)
                 })
-                .OrderByDescending(user => user.LastMessageTime ?? DateTime.MinValue)
-                .ThenBy(user => user.Name);
+                .ToListAsync();
 
-            return Ok(summaries);
+            return Ok(summaries
+                .OrderByDescending(user => user.LastMessage?.SentTime ?? DateTime.MinValue)
+                .ThenBy(user => user.Name)
+                .Select(user => new
+                {
+                    user.UserId,
+                    user.Name,
+                    LastMessageText = user.LastMessage?.Text,
+                    LastMessageTime = user.LastMessage is null
+                        ? (DateTime?)null
+                        : DateTime.SpecifyKind(user.LastMessage.SentTime, DateTimeKind.Utc),
+                    LastMessageContentType = user.LastMessage?.MediaContentType,
+                    user.UnreadCount
+                }));
         }
 
         [Authorize]
@@ -364,10 +357,29 @@ namespace ChatAPI.Controllers
             return Ok(new { deletedCount });
         }
 
+        [EnableRateLimiting("auth")]
         [HttpPost("Register")]
         public async Task<IActionResult> Register([FromBody] RegisterDto model)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == model.Email);
+            var name = model.Name?.Trim();
+            var email = model.Email?.Trim();
+            var password = model.Password;
+            if (string.IsNullOrWhiteSpace(name) || name.Length > 100 ||
+                string.IsNullOrWhiteSpace(email) || email.Length > 100 ||
+                !new EmailAddressAttribute().IsValid(email) ||
+                string.IsNullOrEmpty(password) || password.Length < 12 || password.Length > 128)
+            {
+                return BadRequest("Enter a valid name and email, and a password between 12 and 128 characters.");
+            }
+
+            var adminEmail = _configuration["Admin:Email"];
+            if (!string.IsNullOrWhiteSpace(adminEmail) &&
+                string.Equals(email, adminEmail.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest("The configured administrator account must be provisioned privately.");
+            }
+
+            var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == email);
 
             if (user != null)
             {
@@ -376,10 +388,11 @@ namespace ChatAPI.Controllers
 
             User newUser = new User
             {
-                Name = model.Name,
-                Email = model.Email,
-                Password = model.Password
+                Name = name,
+                Email = email,
+                Password = string.Empty
             };
+            newUser.PasswordHash = _passwordHasher.HashPassword(newUser, password);
 
             _context.Add(newUser);
             await _context.SaveChangesAsync();
@@ -388,16 +401,29 @@ namespace ChatAPI.Controllers
             return Ok("User Registered Successfully");
         }
 
+        [EnableRateLimiting("auth")]
         [HttpPost("Login")]
         public async Task<IActionResult> Login([FromBody] LoginDto model)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(x =>
-                x.Email == model.Email &&
-                x.Password == model.Password);
+            if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrEmpty(model.Password))
+                return Unauthorized("Invalid Email or Password");
 
-            if (user == null)
+            var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == model.Email.Trim());
+
+            if (user?.PasswordHash is null)
             {
                 return Unauthorized("Invalid Email or Password");
+            }
+
+            var verification = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, model.Password);
+            if (verification == PasswordVerificationResult.Failed)
+            {
+                return Unauthorized("Invalid Email or Password");
+            }
+            if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                user.PasswordHash = _passwordHasher.HashPassword(user, model.Password);
+                await _context.SaveChangesAsync();
             }
 
             var token = _tokenService.CreateToken(user);

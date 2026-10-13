@@ -68,7 +68,13 @@ namespace ChatAPI.Migrations
 
                     b.HasKey("MessageId");
 
+                    b.HasIndex("ReceiverId", "SenderId", "SentTime")
+                        .HasDatabaseName("IX_Messages_Receiver_Sender_SentTime");
+
                     b.HasIndex("ReceiverId");
+
+                    b.HasIndex("SenderId", "ReceiverId", "SentTime")
+                        .HasDatabaseName("IX_Messages_Sender_Receiver_SentTime");
 
                     b.HasIndex("SenderId");
 
@@ -92,6 +98,10 @@ namespace ChatAPI.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("PasswordHash")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Password")
                         .IsRequired()

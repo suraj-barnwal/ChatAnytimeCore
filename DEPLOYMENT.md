@@ -23,11 +23,11 @@ Copy-Item .env.example .env
 Edit `.env` and replace the example values:
 
 - `CHAT_DB_CONNECTION`: `Server=host.docker.internal,1433;Database=ChatDB;User Id=<sql-login>;Password=<strong-password>;Encrypt=True;TrustServerCertificate=True;`
-- `JWT_KEY`: a private random secret of at least 32 characters. Generate one in PowerShell with `[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))`.
-- `ADMIN_EMAIL`: the email address that should receive the app's admin role.
+- `JWT_KEY`: a private cryptographically random secret of at least 32 bytes. Generate one in PowerShell with `[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))`.
+- `ADMIN_EMAIL`: the email address of an existing administrator account. Public registration for this address is blocked; provision the administrator account privately before deployment.
 - `PUBLIC_ORIGIN`: your exact Tailscale HTTPS origin, for example `https://your-pc.your-tailnet.ts.net`.
 
-Keep `.env` private; it is ignored by Git and Docker.
+Keep `.env` private; it is ignored by Git and Docker. Back up the `ChatDB` database before the first startup with this release: its migration adds password hashes, converts existing account passwords to hashes, and clears their old plain-text values while preserving logins.
 
 ## Start the app and publish it
 
@@ -45,7 +45,7 @@ tailscale funnel --bg 8090
 tailscale funnel status
 ```
 
-Use the `https://...ts.net` URL shown by Tailscale to open the app from outside your network. Anyone with that public URL can reach the app, so use strong account passwords and only share the URL with intended users. The funnel only publishes the web service; it does not make SQL Server public.
+Use the `https://...ts.net` URL shown by Tailscale to open the app from outside your network. Funnel makes the website reachable by anyone on the internet; app authentication is still required. The funnel only publishes the web service; it does not make SQL Server public.
 
 ## Redeploy or stop
 

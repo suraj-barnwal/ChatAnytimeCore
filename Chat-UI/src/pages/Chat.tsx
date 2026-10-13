@@ -13,6 +13,7 @@ type ChatMessage = {
     direction: "incoming" | "outgoing";
     time: string;
     queued?: boolean;
+    pending?: boolean;
     status?: "sent" | "received" | "seen";
     mediaContentType?: string;
     mediaFileName?: string;
@@ -138,6 +139,7 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
     const selectedReceiverId = useRef<number | null>(receiverId);
     const usersRefreshVersion = useRef(0);
     const statusUpdates = useRef(new Map<number, ChatMessage["status"]>());
+    const nextOptimisticMessageId = useRef(-1);
     const messageAreaRef = useRef<HTMLDivElement | null>(null);
     const mediaInputRef = useRef<HTMLInputElement | null>(null);
     const emojiControlRef = useRef<HTMLDivElement | null>(null);
@@ -255,13 +257,16 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
                     mediaFileName
                 }]);
             }
-            if (!isCurrentConversation || !isVisibleToUser) {
-                setUsers((previous) => previous.map((user) => user.userId === senderId
-                    ? { ...user, unreadCount: user.unreadCount + 1, lastMessageText: receivedMessage || user.lastMessageText, lastMessageTime: sentTime, lastMessageContentType: mediaContentType ?? user.lastMessageContentType }
-                    : user).sort((left, right) => (right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0) - (left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0) || left.name.localeCompare(right.name)));
-            }
+            setUsers((previous) => previous.map((user) => user.userId === senderId
+                ? {
+                    ...user,
+                    unreadCount: isCurrentConversation && isVisibleToUser ? 0 : user.unreadCount + 1,
+                    lastMessageText: receivedMessage || (mediaContentType ? "" : user.lastMessageText),
+                    lastMessageTime: sentTime,
+                    lastMessageContentType: mediaContentType ?? user.lastMessageContentType
+                }
+                : user).sort((left, right) => (right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0) - (left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0) || left.name.localeCompare(right.name)));
             connection.invoke("AcknowledgeMessage", id, isCurrentConversation && isVisibleToUser)
-                .then(() => refreshUsers())
                 .catch((error: unknown) => console.error("Could not acknowledge message:", error));
         };
 
@@ -357,24 +362,35 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
             return;
         }
 
+        const optimisticId = nextOptimisticMessageId.current--;
+        const sentTime = new Date().toISOString();
         try {
             setSendError("");
+            setMessages((previous) => [...previous, {
+                id: optimisticId,
+                text: trimmedMessage,
+                direction: "outgoing",
+                time: formatMessageTime(sentTime),
+                status: "sent",
+                pending: true
+            }]);
+            setMessage("");
             const result = await connection.invoke<{ messageId: number; queued: boolean; error?: string }>("SendMessage", receiverId, trimmedMessage);
             if (result.error || result.messageId < 1) {
+                setMessages((previous) => previous.filter((item) => item.id !== optimisticId));
+                setMessage((current) => current || trimmedMessage);
                 setSendError(result.error || "Message could not be sent.");
                 return;
             }
-            setMessages((previous) => [...previous, {
-                id: result.messageId,
-                text: trimmedMessage,
-                direction: "outgoing",
-                time: formatMessageTime(new Date()),
-                queued: result.queued,
-                status: statusUpdates.current.get(result.messageId) ?? "sent"
-            }]);
-            setMessage("");
-            void refreshUsers().catch((error: unknown) => console.error("Could not refresh conversation notifications:", error));
+            setMessages((previous) => previous.map((item) => item.id === optimisticId
+                ? { ...item, id: result.messageId, pending: false, queued: result.queued, status: statusUpdates.current.get(result.messageId) ?? "sent" }
+                : item));
+            setUsers((previous) => previous.map((user) => user.userId === receiverId
+                ? { ...user, lastMessageText: trimmedMessage, lastMessageTime: sentTime }
+                : user).sort((left, right) => (right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0) - (left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0) || left.name.localeCompare(right.name)));
         } catch (error) {
+            setMessages((previous) => previous.filter((item) => item.id !== optimisticId));
+            setMessage((current) => current || trimmedMessage);
             console.error("Send Message Error:", error);
             setSendError("Message could not be sent. Please try again.");
         }
@@ -609,7 +625,7 @@ function Chat({ isAvailable, onLogout, onAvailabilityChange }: { isAvailable: bo
                                     <div className={`message-bubble ${chatMessage.mediaContentType ? "has-media" : ""}`}>
                                         {chatMessage.mediaContentType && <MessageMedia messageId={chatMessage.id} contentType={chatMessage.mediaContentType} fileName={chatMessage.mediaFileName} onSize={updateMediaFileSize} />}
                                         {chatMessage.text && <span className="message-text">{chatMessage.text}</span>}
-                                        <span className="message-time">{chatMessage.time}{chatMessage.mediaFileSizeBytes !== undefined && <span className="media-size"> · {attachmentSizeLabel(chatMessage.mediaFileSizeBytes)}</span>}{chatMessage.queued ? " · Queued" : ""}{chatMessage.direction === "outgoing" && <span className={`message-status ${chatMessage.status ?? "sent"}`} title={chatMessage.status ?? "sent"} aria-label={chatMessage.status ?? "sent"}>{chatMessage.status === "sent" ? "✓" : "✓✓"}</span>}</span>
+                                        <span className="message-time">{chatMessage.time}{chatMessage.mediaFileSizeBytes !== undefined && <span className="media-size"> · {attachmentSizeLabel(chatMessage.mediaFileSizeBytes)}</span>}{chatMessage.pending ? " · Sending…" : chatMessage.queued ? " · Queued" : ""}{chatMessage.direction === "outgoing" && <span className={`message-status ${chatMessage.status ?? "sent"}`} title={chatMessage.status ?? "sent"} aria-label={chatMessage.status ?? "sent"}>{chatMessage.status === "sent" ? "✓" : "✓✓"}</span>}</span>
                                     </div>
                                 </div>
                             ))}
