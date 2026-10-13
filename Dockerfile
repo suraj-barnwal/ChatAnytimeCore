@@ -1,8 +1,8 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+﻿FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ChatAPI.csproj ./
+COPY OnChat_CoreAPI/ChatAPI.csproj ./
 RUN dotnet restore ChatAPI.csproj
-COPY . ./
+COPY OnChat_CoreAPI/ ./
 RUN dotnet publish ChatAPI.csproj -c Release -o /app/publish --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime

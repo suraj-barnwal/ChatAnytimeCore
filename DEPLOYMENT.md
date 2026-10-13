@@ -1,13 +1,13 @@
-# Docker deployment
+﻿# Docker deployment
 
-This repository currently contains the API only. `Chat-UI` is a sibling directory outside this Git checkout, so cloning this repository on the server will not include the UI. Publish/add the UI source to a Git repository before expecting one `git pull` and one Compose rebuild to update the complete application.
+This repository contains the frontend (`Chat-UI`), API (`OnChat_CoreAPI`), and shared deployment files at the repository root. Clone the repository once to get both projects and the deployment configuration.
 
 ## API container
 
 1. Install Docker Engine with the Compose plugin on the server.
-2. Clone this repository, then copy `.env.example` to `.env` and set real values. Generate a private JWT key (at least 32 characters) and use a SQL login dedicated to this app. Keep `.env` out of Git.
+2. From the repository root, copy `.env.example` to `.env` and set real values. Generate a private JWT key (at least 32 characters) and use a SQL login dedicated to this app. Keep `.env` out of Git.
 3. Configure SQL Server to listen on a fixed TCP port, enable remote TCP connections, and allow that port through the server firewall. The example connection uses `host.docker.internal,1433`; use the actual host address and port if that name does not resolve on the server.
-4. Start the API:
+4. Start the API from the repository root:
 
    ```powershell
    docker compose up -d --build
@@ -21,7 +21,7 @@ This repository currently contains the API only. `Chat-UI` is a sibling director
 
 ## Redeploy after pulling changes
 
-On the server, from the repository directory:
+On the server, from the repository root:
 
 ```powershell
 git pull
@@ -29,4 +29,4 @@ docker compose up -d --build
 docker image prune -f
 ```
 
-The named service is rebuilt and restarted; the SQL database remains on the SQL Server host. Check `docker compose logs -f chat-api` after deployment. Repeat the pull/build for the UI repository once it is published and included in the server's deployment setup.
+The named API service is rebuilt and restarted; the SQL database remains on the SQL Server host. Check `docker compose logs -f chat-api` after deployment. The frontend source is included under `Chat-UI`; rebuild its production assets and reload the web server after frontend changes.

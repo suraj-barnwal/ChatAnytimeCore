@@ -1,10 +1,9 @@
-.vs/
-bin/
-obj/
+﻿# Workspace-only files
+/.vs/
+/Notes.docx
+/package-lock.json
 
-*.user
-*.suo
-*.cache
+# Local deployment secrets
 .env
 .env.*
 !.env.example

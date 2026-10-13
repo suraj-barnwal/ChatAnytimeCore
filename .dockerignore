@@ -1,9 +1,12 @@
+﻿# Keep the Docker build context small and exclude local/generated material.
 .git
 .vs
-bin
-obj
 **/bin
 **/obj
-*.user
-*.suo
-appsettings.Development.json
+**/node_modules
+**/dist
+**/dist-ssr
+**/*.user
+**/*.suo
+**/*.cache
+Notes.docx

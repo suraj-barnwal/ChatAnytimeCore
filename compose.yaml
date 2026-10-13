@@ -1,7 +1,8 @@
-services:
+﻿services:
   chat-api:
     build:
       context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
